@@ -88,8 +88,11 @@ public:
         EXT_JG      = 0x8F,
 
         EXT_SET_E   = 0x94,
+        EXT_SET_NE  = 0x95,
         EXT_SET_L   = 0x9C,
-        EXT_SET_G   = 0x9F,
+        EXT_SET_B   = 0x92,
+        EXT_SET_LE  = 0x9E,
+        EXT_SET_BE  = 0x96,
         
         EXT_IMUL    = 0xAF,
         EXT_MOVZX   = 0xB6,
@@ -350,17 +353,17 @@ public:
     
     void emit_jit_func_end() {
         emit(0x48, 0x83, 0xC4, 0x20);  // ADD RSP, 32
-        emit_pop(reg_t::R15);
-        emit_pop(reg_t::R14);
-        emit_pop(reg_t::R13);
-        emit_pop(reg_t::R12);
-        emit_pop(reg_t::R11);
-        emit_pop(reg_t::R10);
-        emit_pop(reg_t::R9);
-        emit_pop(reg_t::R8);
-        emit_pop(reg_t::RSI);
-        emit_pop(reg_t::RDI);
-        emit_pop(reg_t::RBX);
+        emit_pop(R15);
+        emit_pop(R14);
+        emit_pop(R13);
+        emit_pop(R12);
+        emit_pop(R11);
+        emit_pop(R10);
+        emit_pop(R9);
+        emit_pop(R8);
+        emit_pop(RSI);
+        emit_pop(RDI);
+        emit_pop(RBX);
         emit(op_t::RET);
     }
 
@@ -534,9 +537,12 @@ public:
                 case opcode_t::sub_f64:
                 case opcode_t::mul_f64:
                 case opcode_t::div_f64:
-                case opcode_t::set_is_equal_64:
+                case opcode_t::set_is_less_than_u64:
                 case opcode_t::set_is_less_than_i64:
-                case opcode_t::set_is_greater_than_i64:
+                case opcode_t::set_is_less_equal_u64:
+                case opcode_t::set_is_less_equal_i64:
+                case opcode_t::set_is_equal_64:
+                case opcode_t::set_is_not_equal_64:
                 {
                     auto rs1 = as.alloc_reg(ins.r.rs1, false);
                     auto rs2 = as.alloc_reg(ins.r.rs2, false);
@@ -562,8 +568,11 @@ public:
                         case opcode_t::div_i64:  as.emit_div64(rd, rs1, rs2, true, false); break;
                         case opcode_t::mod_i64:  as.emit_div64(rd, rs1, rs2, true, true); break;
                         case opcode_t::set_is_equal_64: as.emit_cmp_set(EXT_SET_E, rd, rs1, rs2); break;
+                        case opcode_t::set_is_not_equal_64: as.emit_cmp_set(EXT_SET_NE, rd, rs1, rs2); break;
                         case opcode_t::set_is_less_than_i64: as.emit_cmp_set(EXT_SET_L, rd, rs1, rs2); break;
-                        case opcode_t::set_is_greater_than_i64: as.emit_cmp_set(EXT_SET_G, rd, rs1, rs2); break;
+                        case opcode_t::set_is_less_equal_i64: as.emit_cmp_set(EXT_SET_LE, rd, rs1, rs2); break;
+                        case opcode_t::set_is_less_than_u64: as.emit_cmp_set(EXT_SET_B, rd, rs1, rs2); break;
+                        case opcode_t::set_is_less_equal_u64: as.emit_cmp_set(EXT_SET_BE, rd, rs1, rs2); break;
 
                         case opcode_t::mul_64: 
                             as.emit_mov(rd, rs1);

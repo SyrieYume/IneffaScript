@@ -303,8 +303,11 @@ private:
     static inline std::map<std::string_view, std::pair<std::string_view, std::array<opcode_t, 3>>> infix_syntaxs = { 
         { "=",  { "", { move_64, move_64, move_64 } }},
         { "==", { "bool", {set_is_equal_64, set_is_equal_64, set_is_equal_64} }},
-        { ">",  { "bool", {set_is_greater_than_i64, set_is_greater_than_u64, set_is_greater_than_f64} }},
+        { "!=", { "bool", {set_is_not_equal_64, set_is_not_equal_64, set_is_not_equal_64} }},
         { "<",  { "bool", {set_is_less_than_i64, set_is_less_than_u64, set_is_less_than_f64} }},
+        { ">",  { "bool", {set_is_less_than_i64, set_is_less_than_u64, set_is_less_than_f64} }},
+        { "<=",  { "bool", {set_is_less_equal_i64, set_is_less_equal_u64, set_is_less_equal_f64} }},
+        { ">=",  { "bool", {set_is_less_equal_i64, set_is_less_equal_u64, set_is_less_equal_f64} }},
         { "+",  { "", {add_64, add_64, add_f64} }},
         { "-",  { "", {sub_64, sub_64, sub_f64} }},
         { "*",  { "", {mul_64, mul_64, mul_f64} }},
@@ -535,6 +538,10 @@ private:
             var2.flags & variable_info_t::is_tmp_reg ? var2 :
             variable_info_t { return_type, context_.alloc_tmp_reg() };
 
+
+        if (syntax_name == ">" || syntax_name == ">=")
+            std::swap(var1, var2);
+
         if (dest.flags & variable_info_t::is_tmp_reg)
             dest.type = return_type;
 
@@ -544,7 +551,7 @@ private:
 
             emit({add_imm_i8, dest.reg_id, var1.reg_id, var2.imm});
         }
-
+        
         else emit({opcodes[(uint8_t)var1.type->type_kind < 3 ? (uint8_t)var1.type->type_kind : 1], dest.reg_id, var1.reg_id, var2.reg_id});
 
         context_.current_stack_top() = stack_top;

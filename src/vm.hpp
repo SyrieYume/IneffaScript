@@ -78,10 +78,11 @@ public:
                 case set_is_less_than_u64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 < bp[ins.r.rs2].u64); break;
                 case set_is_less_than_i64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].i64 < bp[ins.r.rs2].i64); break;
                 case set_is_less_than_f64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].f64 < bp[ins.r.rs2].f64); break;
-                case set_is_greater_than_u64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 > bp[ins.r.rs2].u64); break;
-                case set_is_greater_than_i64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].i64 > bp[ins.r.rs2].i64); break;
-                case set_is_greater_than_f64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].f64 > bp[ins.r.rs2].f64); break;
+                case set_is_less_equal_u64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 <= bp[ins.r.rs2].u64); break;
+                case set_is_less_equal_i64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].i64 <= bp[ins.r.rs2].i64); break;
+                case set_is_less_equal_f64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].f64 <= bp[ins.r.rs2].f64); break;
                 case set_is_equal_64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 == bp[ins.r.rs2].u64); break;
+                case set_is_not_equal_64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 != bp[ins.r.rs2].u64); break;
                 
                 case jump: pc += (std::ptrdiff_t)ins.u.imm; break;
                 case jump_if_true: if(bp[ins.rd].u64 != 0) pc += (std::ptrdiff_t)ins.u.imm; break;
