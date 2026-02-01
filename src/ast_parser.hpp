@@ -11,6 +11,7 @@ namespace ineffa::script {
 struct alignas(uintptr_t) ast_node_t {
     enum node_type_t : uint8_t { type_atom, type_list };
     node_type_t type;
+    uint16_t line;
     uint32_t data_size;
 
     bool is_atom() const noexcept { return type == type_atom; }
@@ -31,106 +32,105 @@ class ast_parser_t {
 public:
     ast_parser_t(std::pmr::polymorphic_allocator<std::byte> allocator) : allocator_(allocator) {}
 
-    auto parse(std::string_view source_code) const -> ast_node_t* try {
-        source_ = source_code;
-        current_ = 0;
+    auto parse(std::string_view source_code) const -> ast_node_t* {
+        current_ = source_code.data();
+        end_ = source_code.data() + source_code.size();
+        line_ = 1;
         
-        return parse_list_node();
-    }
-    catch(const std::exception& e) {
-        std::string_view parsed_str = source_.substr(0, current_);
-        int line = std::count(parsed_str.begin(), parsed_str.end(), '\n') + 1;
-        int col = current_ - parsed_str.rfind('\n');
-        throw std::runtime_error(std::format("[ast_parser_error][{},{}] {}", line, col, e.what()));
-    }
-
-private:
-    auto is_at_end() const noexcept -> bool {
-        return current_ >= source_.length();
-    }
-
-    auto peek() const noexcept -> char {
-        if (is_at_end()) [[unlikely]]
-            return '\0';
-        return source_[current_];
-    }
-
-    bool match(char expected) const {
-        if (peek() == expected) {
-            current_++;
-            return true;
-        }
-        return false;
-    }
-
-    template <typename Func>
-    requires requires(Func func, char c) { { func(c) } -> std::convertible_to<bool>; }
-    auto match_while(Func&& condition) const noexcept -> std::string_view {
-        const uint32_t start = current_;
-        uint32_t current = current_;
-        const size_t len = source_.length();
-        const char* data = source_.data();
-
-        while (current < len && condition(data[current]))
-            ++current;
-
-        current_ = current;
-        return std::string_view(data + start, current - start);
-    }
-
-
-    auto parse_list_node() const -> ast_node_t* {
-        std::vector<ast_node_t*> buffer;
-
+        std::vector<ast_node_t*> root_exprs;
+        
         while (true) {
-            match_while(char_utils::is_space);
+            skip();
 
-            if (is_at_end() || match(')'))
+            if (current_ >= end_) [[unlikely]]
                 break;
-            
-            if (match(';')) {
-                match_while([](char c) { return c != '\n'; });
-                continue;
-            }
-            
-            if (match('(')) {
-                buffer.push_back(parse_list_node());
-                continue;
-            }
-                
-            if (match('"')) {
-                std::string_view text = match_while([](char c) { return c != '"'; });
-                if (is_at_end() || !match('"')) [[unlikely]]
-                    throw std::runtime_error("unterminated string literal");
-                buffer.push_back(make_atom_node(std::string_view(text.data() - 1, text.data() + text.length() + 1)));
-            }
 
-            else buffer.push_back(make_atom_node(match_while([](char c) { return !char_utils::is_space(c) && c != ')' && c != '(' && c != '"'; })));
+            root_exprs.push_back(parse_expr());
         }
-        
-        return make_list_node(buffer);
-    }
 
-    auto make_atom_node(std::string_view text) const -> ast_node_t* {
-        void* node_memory = allocator_.allocate_bytes(sizeof(ast_node_t) + sizeof(char*), alignof(ast_node_t));
-        ast_node_t* node = (ast_node_t*)std::assume_aligned<8>(node_memory);
-        *node = { ast_node_t::type_atom, (uint32_t)text.length() };
-        *(const char**)(node + 1) = text.data();
-        return node;
-    }
-
-    auto make_list_node(std::span<ast_node_t*> list) const -> ast_node_t* {
-        void* node_memory = allocator_.allocate_bytes(sizeof(ast_node_t) + sizeof(ast_node_t*) * list.size(), alignof(ast_node_t));
-        ast_node_t* node = (ast_node_t*)std::assume_aligned<8>(node_memory);
-        *node = { ast_node_t::type_list, uint32_t(sizeof(ast_node_t*) * list.size()) };
-        std::memcpy(node + 1, list.data(), sizeof(ast_node_t*) * list.size());
-        return node;
+        return alloc_node(ast_node_t::type_list, root_exprs.size() * sizeof(void*), root_exprs.data());
     }
 
 private:
+    [[noreturn]] void error(std::string_view msg) const {
+        throw std::runtime_error(std::format("[ast_parser_error] [line: {}] {}", line_, msg));
+    }
+
+    void skip() const noexcept {
+        while (current_ < end_) {
+            if (match('\n')) [[unlikely]]
+                line_++;
+
+            else if (char_utils::is_space(*current_)) [[likely]]
+                current_++;
+
+            else if (match(';'))
+                for (; current_ < end_ && *current_ != '\n'; current_++);
+
+            else break;
+        }
+    }
+
+    bool match(char expected) const noexcept {
+        return *current_ == expected ? (++current_, true) : false;
+    }
+
+    ast_node_t* alloc_node(ast_node_t::node_type_t type, uint32_t data_len, const void* data) const {
+        size_t bytes = sizeof(ast_node_t) + (type == ast_node_t::type_atom ? sizeof(const char*) : data_len);
+        auto* node = (ast_node_t*)allocator_.allocate_bytes(bytes, alignof(ast_node_t));
+        *node = ast_node_t(type, line_, data_len);
+
+        return type == ast_node_t::type_list ?
+            (std::memcpy(node + 1, data, data_len), node) :
+            (*(const char**)(node + 1) = (const char*)data, node);
+    }
+
+    ast_node_t* parse_expr() const {
+        if (skip(); current_ >= end_) [[unlikely]]
+            error("unexpected end of file");
+
+        if (match(')')) [[unlikely]]
+            error("unexpected ')'");
+
+        if (match('(')) {
+            std::vector<ast_node_t*> list;
+
+            while (true) {
+                if (skip(); current_ >= end_) [[unlikely]]
+                    error("unexpected enf of file, missing ')'");
+
+                if (match(')')) [[unlikely]] 
+                    break;
+
+                list.push_back(parse_expr());
+            }
+
+            return alloc_node(ast_node_t::type_list, list.size() * sizeof(uintptr_t), list.data());
+        }
+
+        const char* start = current_;
+
+        if (match('"')) {
+            for (;;current_++) {
+                if (current_ >= end_) [[unlikely]]
+                    error("unterminated string literal");
+
+                if (match('"'))
+                    break;
+
+                match('\\');
+            }
+        }
+
+        else for (char c; current_ < end_ && (c = *current_, !char_utils::is_space(c) && c != ')' && c != '('); current_++);
+
+        return alloc_node(ast_node_t::type_atom, (uint32_t)(current_ - start), start);
+    }
+
     mutable std::pmr::polymorphic_allocator<std::byte> allocator_;
-    mutable std::string_view source_;
-    mutable uint32_t current_;
+    mutable const char* current_;
+    mutable const char* end_;
+    mutable uint32_t line_;
 };
 
 }
