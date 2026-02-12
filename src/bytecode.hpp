@@ -40,15 +40,14 @@ generate_enum_class_and_map(uint8_t, opcode_t, opcode_to_string_array, string_to
     set_is_less_than_f64,
     set_is_less_equal_u64,
     set_is_less_equal_i64,
-    set_is_less_equal_f64,
     set_is_equal_64,
     set_is_not_equal_64,
 
     jump,
     jump_if_true,
     jump_if_false,
-    jump_if_greater_than_i64,
-    jump_if_greater_equal_i64,
+    jump_if_less_than_i64,
+    jump_if_less_equal_i64,
     loop_inc_check_jump,
 
     load_64,
@@ -78,6 +77,7 @@ generate_enum_class_and_map(uint8_t, opcode_t, opcode_to_string_array, string_to
     call_host,
     ret,
 
+    nop,
     halt,
 );
 
@@ -113,7 +113,7 @@ static_assert(std::endian::native == std::endian::little && sizeof(instruction_t
 
 struct value_t {
     union {
-        const void* ptr;
+        void* ptr;
         uint64_t u64;
         int64_t i64;
         double f64;
@@ -131,7 +131,6 @@ struct value_t {
 
 struct function_info_t {
     uint32_t start, end;
-    uint32_t args_size;
     uint32_t ret_val_size;
 };
 

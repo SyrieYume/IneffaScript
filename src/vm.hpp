@@ -80,47 +80,45 @@ public:
                 case set_is_less_than_f64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].f64 < bp[ins.r.rs2].f64); break;
                 case set_is_less_equal_u64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 <= bp[ins.r.rs2].u64); break;
                 case set_is_less_equal_i64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].i64 <= bp[ins.r.rs2].i64); break;
-                case set_is_less_equal_f64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].f64 <= bp[ins.r.rs2].f64); break;
                 case set_is_equal_64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 == bp[ins.r.rs2].u64); break;
                 case set_is_not_equal_64: bp[ins.rd].u64 = uint64_t(bp[ins.r.rs1].u64 != bp[ins.r.rs2].u64); break;
                 
                 case jump: pc += (std::ptrdiff_t)ins.u.imm; break;
                 case jump_if_true: if(bp[ins.rd].u64 != 0) pc += (std::ptrdiff_t)ins.u.imm; break;
                 case jump_if_false: if(bp[ins.rd].u64 == 0) pc += (std::ptrdiff_t)ins.u.imm; break;
-                case jump_if_greater_than_i64: if (bp[ins.rd].i64 > bp[ins.i.rs1].i64) pc += (std::ptrdiff_t)ins.i.imm; break;
-                case jump_if_greater_equal_i64: if (bp[ins.rd].i64 >= bp[ins.i.rs1].i64) pc += (std::ptrdiff_t)ins.i.imm; break;
+                case jump_if_less_than_i64: if (bp[ins.rd].i64 < bp[ins.i.rs1].i64) pc += (std::ptrdiff_t)ins.i.imm; break;
+                case jump_if_less_equal_i64: if (bp[ins.rd].i64 <= bp[ins.i.rs1].i64) pc += (std::ptrdiff_t)ins.i.imm; break;
                 case loop_inc_check_jump: if (++bp[ins.rd].i64 < bp[ins.i.rs1].i64) [[unlikely]] pc -= (uint8_t)ins.i.imm; break;
 
-                case load_64:  bp[ins.rd].u64 = *((const uint64_t*)std::assume_aligned<8>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
-                case load_u32: bp[ins.rd].u64 = *((const uint32_t*)std::assume_aligned<4>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
-                case load_u8:  bp[ins.rd].u64 = *((const uint8_t* )std::assume_aligned<1>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
-                case load_i32: bp[ins.rd].i64 = *((const int32_t* )std::assume_aligned<4>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
-                case load_i16:[[unlikely]] bp[ins.rd].i64 = *((const int16_t* )std::assume_aligned<2>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
-                case load_u16: [[unlikely]] bp[ins.rd].u64 = *((const uint16_t*)std::assume_aligned<2>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
-                case load_i8: [[unlikely]] bp[ins.rd].i64 = *((const int8_t*  )std::assume_aligned<1>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm); break;
+                case load_64:  bp[ins.rd].u64 = ((const uint64_t*)std::assume_aligned<8>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
+                case load_u32: bp[ins.rd].u64 = ((const uint32_t*)std::assume_aligned<4>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
+                case load_i32: bp[ins.rd].i64 = ((const int32_t* )std::assume_aligned<4>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
+                case load_u8:  bp[ins.rd].u64 = ((const uint8_t* )std::assume_aligned<1>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
+                case load_i16: [[unlikely]] bp[ins.rd].i64 = ((const int16_t* )std::assume_aligned<2>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
+                case load_u16: [[unlikely]] bp[ins.rd].u64 = ((const uint16_t*)std::assume_aligned<2>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
+                case load_i8:  [[unlikely]] bp[ins.rd].i64 = ((const int8_t*  )std::assume_aligned<1>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64]; break;
 
-                case store_64: *((uint64_t*)std::assume_aligned<8>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm) = bp[ins.rd].u64; break;
-                case store_32: *((uint32_t*)std::assume_aligned<4>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm) = bp[ins.rd].u32; break;
-                case store_8:  *((uint8_t* )std::assume_aligned<1>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm) = bp[ins.rd].u8; break;
-                case store_16: [[unlikely]] *((uint16_t*)std::assume_aligned<2>(bp[ins.i.rs1].ptr) + (int64_t)ins.i.imm) = bp[ins.rd].u16; break;
+                case store_64: ((uint64_t*)std::assume_aligned<8>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64] = bp[ins.rd].u64; break;
+                case store_32: ((uint32_t*)std::assume_aligned<4>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64] = bp[ins.rd].u32; break;
+                case store_8:  ((uint8_t* )std::assume_aligned<1>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64] = bp[ins.rd].u8; break;
+                case store_16: [[unlikely]] ((uint16_t*)std::assume_aligned<2>(bp[ins.r.rs1].ptr))[bp[ins.r.rs2].i64] = bp[ins.rd].u16; break;
 
                 case load_global_64: [[unlikely]] bp[ins.rd].u64 = value_stack[(uint16_t)ins.u.imm].u64; break;
                 case store_global_64: [[unlikely]] value_stack[(uint16_t)ins.u.imm].u64 = bp[ins.rd].u64; break;
-                case load_constant_str: [[unlikely]] bp[ins.rd].ptr = (const uint64_t*)exe.constants.data() + (uint16_t)ins.u.imm; break;
-                case load_constant_64: [[unlikely]] bp[ins.rd].u64 = *((const uint64_t*)exe.constants.data() + (uint16_t)ins.u.imm);  break;
+                case load_constant_str: [[unlikely]] bp[ins.rd].ptr = (uint64_t*)exe.constants.data() + (uint16_t)ins.u.imm; break;
+                case load_constant_64: [[unlikely]] bp[ins.rd].u64 = *((uint64_t*)exe.constants.data() + (uint16_t)ins.u.imm);  break;
                 
                 case cast_i64_to_f64: [[unlikely]] bp[ins.rd].f64 = static_cast<double>(bp[ins.i.rs1].i64); break;
                 case cast_f64_to_i64: [[unlikely]] bp[ins.rd].i64 = static_cast<int64_t>(bp[ins.i.rs1].f64); break;
-                
-                
-                case call: [[likely]]
+                        
+                case call:
                     *(sp++) = ins.rd;
                     *(sp++) = (uint64_t)pc;
                     bp += ins.rd;
                     pc += (std::ptrdiff_t)ins.u.imm;
                     break;
                     
-                case call_reg:
+                case call_reg: [[unlikely]]
                     *(sp++) = (uint16_t)ins.u.imm;
                     *(sp++) = (uint64_t)pc;
                     bp += (uint16_t)ins.u.imm;
@@ -138,9 +136,10 @@ public:
                     bp -= *(--sp);
                     break;
                 
+                case nop: [[unlikely]] break;
                 case halt: [[unlikely]] goto end;
 
-                default: std::unreachable();
+                default: [[unlikely]] std::unreachable();
             }
         }
     end:

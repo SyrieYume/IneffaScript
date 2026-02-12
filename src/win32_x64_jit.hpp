@@ -1,11 +1,11 @@
 #pragma once
 #ifndef _WIN32
-#error "This JIT compiler only supports Windows."
+#error "This JIT compiler only supports Windows"
 #endif
 
 static_assert(sizeof(void*) == 8, "This JIT compiler only supports 64-bit architecture (x64)");
 #if !defined(_M_X64) && !defined(__x86_64__)
-    static_assert(false, "x64 architecture macro not detected.");
+    static_assert(false, "x64 architecture macro not detected");
 #endif
 
 #include <format>
@@ -32,13 +32,9 @@ public:
     };
 
     enum class op_t : uint8_t {
-        ADD_RM_R  = 0x01,
         ADD_R_RM  = 0x03,
-        OR_RM_R   = 0x09,
         OR_R_RM   = 0x0B,
-        AND_RM_R  = 0x21,
         AND_R_RM  = 0x23,
-        SUB_RM_R  = 0x29,
         SUB_R_RM  = 0x2B,
         XOR_R_RM  = 0x33,
         CMP_R_RM  = 0x3B,
@@ -46,8 +42,10 @@ public:
         ALU_IMM8  = 0x83, 
         TEST_RM_R = 0x85,
         
+        MOV_RM8_R8   = 0x88,
         MOV_RM_R     = 0x89,
         MOV_R_RM     = 0x8B,
+        MOVSXD       = 0x63,
         LEA          = 0x8D,
         MOV_RM_IMM32 = 0xC7,
         MOV_IMM_REG_BASE = 0xB8,
@@ -70,22 +68,10 @@ public:
         PRE_SSE_66  = 0x66,
         PRE_SSE_F2  = 0xF2,
         
-        EXT_JO      = 0x80,
-        EXT_JNO     = 0x81,
-        EXT_JB      = 0x82,
-        EXT_JAE     = 0x83,
         EXT_JE      = 0x84,
         EXT_JNE     = 0x85,
-        EXT_JBE     = 0x86,
-        EXT_JA      = 0x87,
-        EXT_JS      = 0x88,
-        EXT_JNS     = 0x89,
-        EXT_JP      = 0x8A,
-        EXT_JNP     = 0x8B,
         EXT_JL      = 0x8C,
-        EXT_JGE     = 0x8D,
         EXT_JLE     = 0x8E,
-        EXT_JG      = 0x8F,
 
         EXT_SET_E   = 0x94,
         EXT_SET_NE  = 0x95,
@@ -95,7 +81,11 @@ public:
         EXT_SET_BE  = 0x96,
         
         EXT_IMUL    = 0xAF,
-        EXT_MOVZX   = 0xB6,
+
+        EXT_MOVZX_R8  = 0xB6,
+        EXT_MOVZX_R16 = 0xB7,
+        EXT_MOVSX_R8  = 0xBE,
+        EXT_MOVSX_R16 = 0xBF,
 
         EXT_CVT_I2D = 0x2A,
         EXT_CVT_D2I = 0x2C,
@@ -126,9 +116,7 @@ public:
     using enum mod_r_m_t;
 
     static constexpr reg_t bp_reg = reg_t::R13;
-    static constexpr reg_t sp_reg = reg_t::R14;
-
-    static constexpr std::array allocable_regs = { RBX, RSI, RDI, R8, R9, R10, R11, R15 };
+    static constexpr std::array allocable_regs = { RBX, RSI, RDI, R8, R9, R10, R11, R14, R15 };
 
     struct reg_state_t {
         uint32_t last_access_time;
@@ -153,12 +141,12 @@ public:
             load_from_bp_index(allocable_regs[i], bp_reg_idx);
     }
 
-    void fflush_reg(uint32_t temp_reg_index) {
-        if (!regs_state[temp_reg_index].is_valid)
+    void fflush_reg(uint32_t reg_index) {
+        if (!regs_state[reg_index].is_valid)
             return;
-        if (regs_state[temp_reg_index].is_dirty)
-            store_to_bp_index(allocable_regs[temp_reg_index], regs_state[temp_reg_index].bp_reg_idx);
-        regs_state[temp_reg_index].is_dirty = false;
+        if (regs_state[reg_index].is_dirty)
+            store_to_bp_index(allocable_regs[reg_index], regs_state[reg_index].bp_reg_idx);
+        regs_state[reg_index].is_dirty = false;
     }
 
     reg_t alloc_reg(uint8_t bp_reg_idx, bool is_to_write) {
@@ -178,22 +166,12 @@ public:
             }
 
         uint32_t min_tick = std::numeric_limits<uint32_t>::max();
-        int32_t eviction_idx = -1;
-
+        int32_t eviction_idx = 0;
+        
         for (uint32_t i = 0; i < allocable_regs.size(); i++) {
-            if (!regs_state[i].is_dirty && regs_state[i].last_access_time < min_tick) {
+            if (regs_state[i].last_access_time < min_tick) {
                 min_tick = regs_state[i].last_access_time;
                 eviction_idx = i;
-            }
-        }
-        
-        if (eviction_idx == -1) {
-            min_tick = std::numeric_limits<uint32_t>::max();
-            for (uint32_t i = 0; i < allocable_regs.size(); i++) {
-                if (regs_state[i].last_access_time < min_tick) {
-                    min_tick = regs_state[i].last_access_time;
-                    eviction_idx = i;
-                }
             }
         }
         
@@ -217,10 +195,9 @@ public:
     }
 
     void fflush_all_regs(std::array<uint8_t, 2> bp_regs_fflush_range = {0, 255}) {
-        for (uint32_t i = 0; i < allocable_regs.size(); i++) {
+        for (uint32_t i = 0; i < allocable_regs.size(); i++)
             if (uint8_t bp_reg_idx = regs_state[i].bp_reg_idx; bp_reg_idx >= bp_regs_fflush_range[0] && bp_reg_idx < bp_regs_fflush_range[1])
                 fflush_reg(i);
-        }
     }
 
     template <typename... Args>
@@ -242,7 +219,7 @@ public:
 
     void emit_rex(reg_t reg, reg_t base, reg_t index = reg_t::RAX, bool is_64bit = true) {
         uint8_t rex = 0x40 | (is_64bit << 3) | (((uint8_t)reg & 8) >> 1) | (((uint8_t)index & 8) >> 2) | (((uint8_t)base & 8) >> 3);
-        if (rex != 0x40) emit(rex);
+        if (rex != 0x40 || (reg >= RSP && reg <= RDI && !is_64bit)) emit(rex);
     }
 
     template<typename T>
@@ -260,12 +237,12 @@ public:
 
     void emit_mov(reg_t dst_idx, reg_t src_idx) {
         if (dst_idx == src_idx) return;
-        emit_alu64(op_t::MOV_R_RM, dst_idx, src_idx);
+        emit_alu64(MOV_R_RM, dst_idx, src_idx);
     }
 
     void emit_alu64_imm8(op_ext_t opcode_ext, reg_t dst, int8_t imm) {
         emit_rex(NO_REG, dst);
-        emit(op_t::ALU_IMM8);
+        emit(ALU_IMM8);
         emit_modrm(Mod_Reg, opcode_ext, dst); 
         emit((uint8_t)imm);
     }
@@ -277,10 +254,10 @@ public:
             emit_rex(NO_REG, NO_REG);
             emit(0x99); // CDQ / CQO
         } else
-            emit_alu64(op_t::XOR_R_RM, RDX, RDX);
+            emit_alu64(XOR_R_RM, RDX, RDX);
 
         emit_rex(NO_REG, rhs);
-        emit(op_t::GRP3_64); 
+        emit(GRP3_64); 
         emit_modrm(Mod_Reg, is_signed ? op_ext_t::IDIV : op_ext_t::DIV, rhs);
         emit_mov(dst, is_mod ? RDX : RAX);
     }
@@ -288,7 +265,7 @@ public:
     void emit_shift64(op_ext_t opcode_ext, reg_t dst, reg_t count_src) {
         emit_mov(RCX, count_src);
         emit_rex(NO_REG, dst);
-        emit(op_t::SHIFT_CL);
+        emit(SHIFT_CL);
         emit_modrm(Mod_Reg, opcode_ext, dst);
     }
 
@@ -296,21 +273,21 @@ public:
         reg_t xmm0 = reg_t(0), xmm1 = reg_t(1);
 
         // MOVQ xmm0, dst
-        emit(op_t::PRE_SSE_66); emit_rex(xmm0, dst); emit(0x0F, op_t::EXT_MOV_Q2D); emit_modrm(Mod_Reg, xmm0, dst); 
+        emit(PRE_SSE_66); emit_rex(xmm0, dst); emit(0x0F, EXT_MOV_Q2D); emit_modrm(Mod_Reg, xmm0, dst); 
         
         // MOVQ xmm1, rhs
-        emit(op_t::PRE_SSE_66); emit_rex(xmm1, rhs); emit(0x0F, op_t::EXT_MOV_Q2D); emit_modrm(Mod_Reg, xmm1, rhs);
+        emit(PRE_SSE_66); emit_rex(xmm1, rhs); emit(0x0F, EXT_MOV_Q2D); emit_modrm(Mod_Reg, xmm1, rhs);
 
         // OP xmm0, xmm1
-        emit(op_t::PRE_SSE_F2); emit_rex(xmm0, xmm1); emit(0x0F, opcode); emit_modrm(Mod_Reg, xmm0, xmm1);
+        emit(PRE_SSE_F2); emit_rex(xmm0, xmm1); emit(0x0F, opcode); emit_modrm(Mod_Reg, xmm0, xmm1);
 
         // MOVQ dst, xmm0
-        emit(op_t::PRE_SSE_66); emit_rex(xmm0, dst); emit(0x0F, op_t::EXT_MOV_D2Q); emit_modrm(Mod_Reg, xmm0, dst); 
+        emit(PRE_SSE_66); emit_rex(xmm0, dst); emit(0x0F, EXT_MOV_D2Q); emit_modrm(Mod_Reg, xmm0, dst); 
     }
 
     void emit_cmp_set(op_t opcode, reg_t dst, reg_t lhs, reg_t rhs) {
         // CMP lhs, rhs
-        emit_alu64(op_t::CMP_R_RM, lhs, rhs);
+        emit_alu64(CMP_R_RM, lhs, rhs);
 
          // SETcc
         emit_rex(NO_REG, dst);
@@ -319,35 +296,30 @@ public:
 
         // MOVZX dst, dst_byte
         emit_rex(dst, dst);
-        emit(0x0F, op_t::EXT_MOVZX);
+        emit(0x0F, EXT_MOVZX_R8);
         emit_modrm(Mod_Reg, dst, dst);
     }
 
     void emit_push(reg_t reg) {
         if (uint8_t(reg) >= 8)  emit(0x41); // REX.B
-        emit(uint8_t(op_t::PUSH_R_BASE) | (uint8_t(reg) & 7));
+        emit(uint8_t(PUSH_R_BASE) | (uint8_t(reg) & 7));
     }
 
     void emit_pop(reg_t reg) {
         if (uint8_t(reg) >= 8)  emit(0x41); // REX.B
-        emit(uint8_t(op_t::POP_R_BASE) | (uint8_t(reg) & 7));
+        emit(uint8_t(POP_R_BASE) | (uint8_t(reg) & 7));
     }
 
     void emit_jit_func_start() {
         emit_push(RBX);
         emit_push(RDI);
         emit_push(RSI);
-        emit_push(R8);
-        emit_push(R9);
-        emit_push(R10);
-        emit_push(R11);
         emit_push(R12);
         emit_push(R13);
         emit_push(R14);
         emit_push(R15);
         emit(0x48, 0x83, 0xEC, 0x20);  // SUB RSP, 32
-        emit_mov(R13, RCX);
-        emit_mov(R14, RDX);
+        emit_mov(bp_reg, RCX);
     }
 
     
@@ -357,14 +329,10 @@ public:
         emit_pop(R14);
         emit_pop(R13);
         emit_pop(R12);
-        emit_pop(R11);
-        emit_pop(R10);
-        emit_pop(R9);
-        emit_pop(R8);
         emit_pop(RSI);
         emit_pop(RDI);
         emit_pop(RBX);
-        emit(op_t::RET);
+        emit(RET);
     }
 
     void emit_reg_mem_op(op_t opcode_base, reg_t reg, reg_t base, int32_t offset) {
@@ -381,11 +349,11 @@ public:
     }
 
     void load_from_bp_index(reg_t reg, uint8_t index) { 
-        emit_reg_mem_op(op_t::MOV_R_RM, reg, bp_reg, (int32_t)index * 8); 
+        emit_reg_mem_op(MOV_R_RM, reg, bp_reg, (int32_t)index * 8); 
     }
 
     void store_to_bp_index(reg_t reg, uint8_t index) noexcept { 
-        emit_reg_mem_op(op_t::MOV_RM_R, reg, bp_reg, (int32_t)index * 8); 
+        emit_reg_mem_op(MOV_RM_R, reg, bp_reg, (int32_t)index * 8); 
     }
 
     void load_imm(reg_t dst, int64_t value) noexcept {
@@ -396,9 +364,39 @@ public:
             emit_u32((uint32_t)(int32_t)value);
         } 
         else {
-            emit((uint8_t)op_t::MOV_IMM_REG_BASE | ((uint8_t)dst & 7));
+            emit((uint8_t)MOV_IMM_REG_BASE | ((uint8_t)dst & 7));
             emit_u64(value);
         }
+    }
+
+    void emit_mem_sib(bool is_store, int width_bytes, bool is_signed, reg_t src_or_dst, reg_t base, reg_t index) {
+        assert(index != RSP && "RSP cannot be used as an index register in SIB encoding");
+
+        uint8_t scale = (width_bytes == 8) ? 3 : (width_bytes == 4) ? 2 : (width_bytes == 2) ? 1 : 0;
+
+        if (width_bytes == 2) 
+            emit(0x66);
+
+        bool is_64bit = is_store ? 
+            (width_bytes == 8) : 
+            (width_bytes == 8 || (width_bytes == 4 && is_signed));
+
+        emit_rex(src_or_dst, base, index, is_64bit);
+
+        if (is_store)
+            emit(width_bytes == 1 ? MOV_RM8_R8 : MOV_RM_R);
+
+        else switch (width_bytes) {
+            case 8: emit(MOV_R_RM); break;
+            case 4: emit(is_signed ? MOVSXD : MOV_R_RM); break;
+            case 2: emit(0x0F, is_signed ? EXT_MOVSX_R16 : EXT_MOVZX_R16); break;
+            case 1: emit(0x0F, is_signed ? EXT_MOVSX_R8 : EXT_MOVZX_R8); break;
+        }
+
+        emit_modrm(Mod_Mem, src_or_dst, RSP); 
+
+        uint8_t sib = (scale << 6) | ((uint8_t(index) & 7) << 3) | (uint8_t(base) & 7);
+        emit(sib);
     }
 };
 
@@ -408,7 +406,6 @@ private:
     struct bytecode_info_t {
         uint32_t target_code_offset;
         bool is_function_start = false;
-        bool is_function_end = false;
         bool is_jump_target = false;
     };
 
@@ -421,9 +418,9 @@ private:
 public:
     struct jit_func_t {
     public:
-        void operator()(value_t* bp, uint64_t* sp) const {
-            auto func = (void(*)(value_t*, uint64_t*))exe_mem;
-            func(bp, sp);
+        void operator()(value_t* bp) const {
+            auto func = (void(*)(value_t*))exe_mem;
+            func(bp);
         }
 
         explicit jit_func_t(std::span<uint8_t> codes) {
@@ -476,10 +473,8 @@ public:
         bytecodes_info.resize(exe.bytecodes.size() + 1);
         std::vector<jump_patch_t> patches;
 
-        for (auto func : exe.functions) {
+        for (auto func : exe.functions)
             bytecodes_info[func.start].is_function_start = true;
-            bytecodes_info[func.end].is_function_end = true;
-        }
             
         for (uint32_t i = 0; i < exe.bytecodes.size(); ++i) {
             const auto& ins = exe.bytecodes[i];
@@ -491,8 +486,8 @@ public:
                 case opcode_t::jump_if_false:
                     target = i + 1 + (int32_t)ins.u.imm;
                     break;
-                case opcode_t::jump_if_greater_than_i64:
-                case opcode_t::jump_if_greater_equal_i64:
+                case opcode_t::jump_if_less_than_i64:
+                case opcode_t::jump_if_less_equal_i64:
                     target = i + 1 + (int32_t)ins.i.imm;
                     break;
                 case opcode_t::loop_inc_check_jump:
@@ -657,7 +652,6 @@ public:
 
                 case opcode_t::jump: {
                     as.fflush_all_regs();
-                    as.mark_regs_invalid();
                     
                     // JMP rel32
                     as.emit(JMP_REL);
@@ -684,8 +678,8 @@ public:
                     break;
                 }
 
-                case opcode_t::jump_if_greater_than_i64:
-                case opcode_t::jump_if_greater_equal_i64: {
+                case opcode_t::jump_if_less_than_i64:
+                case opcode_t::jump_if_less_equal_i64: {
                     auto rd = as.alloc_reg(ins.rd, false);
                     auto rs1 = as.alloc_reg(ins.i.rs1, false);
 
@@ -694,8 +688,8 @@ public:
                     // CMP rd, rs1
                     as.emit_alu64(CMP_R_RM, rd, rs1);
 
-                    // JG / JGE rel32
-                    as.emit(0x0F, ins.opcode == opcode_t::jump_if_greater_than_i64 ? EXT_JG : EXT_JGE);
+                    // JL / JLE rel32
+                    as.emit(0x0F, ins.opcode == opcode_t::jump_if_less_than_i64 ? EXT_JL : EXT_JLE);
                     patches.push_back({ (uint32_t)as.codes.size(), (uint32_t)i, (int32_t)ins.i.imm });
                     as.emit_u32(0);
                     break;
@@ -723,55 +717,81 @@ public:
                     break;
                 }
 
+                case opcode_t::load_64:
+                case opcode_t::load_u32:
+                case opcode_t::load_i32:
+                case opcode_t::load_u16: 
+                case opcode_t::load_i16: 
+                case opcode_t::load_u8:  
+                case opcode_t::load_i8:
+                case opcode_t::store_64:
+                case opcode_t::store_32:  
+                case opcode_t::store_16:
+                case opcode_t::store_8: {
+                    struct { int width_bytes; bool is_signed; bool is_store; } cfg;
+                    switch (ins.opcode) {
+                        case opcode_t::store_8:  cfg = {1, 0, 1}; break;
+                        case opcode_t::store_16: cfg = {2, 0, 1}; break;
+                        case opcode_t::store_32: cfg = {4, 0, 1}; break;
+                        case opcode_t::store_64: cfg = {8, 0, 1}; break;
+                        case opcode_t::load_u8:  cfg = {1, 0, 0}; break;
+                        case opcode_t::load_i8:  cfg = {1, 1, 0}; break;
+                        case opcode_t::load_u16: cfg = {2, 0, 0}; break;
+                        case opcode_t::load_i16: cfg = {2, 1, 0}; break;
+                        case opcode_t::load_u32: cfg = {4, 0, 0}; break;
+                        case opcode_t::load_i32: cfg = {4, 1, 0}; break;
+                        case opcode_t::load_64:  cfg = {8, 0, 0}; break;
+                        default: std::unreachable();
+                    }
+
+                    auto base  = as.alloc_reg(ins.r.rs1, false);
+                    auto index = as.alloc_reg(ins.r.rs2, false);
+                    auto src_or_dst = as.alloc_reg(ins.rd, !cfg.is_store);
+
+                    as.emit_mem_sib(cfg.is_store, cfg.width_bytes, cfg.is_signed, src_or_dst, base, index);
+                    break;
+                }
+
                 case opcode_t::call: {
-                    as.fflush_all_regs({(uint8_t)ins.rd, 255});
+                    as.fflush_all_regs();
                     as.mark_regs_invalid();
 
-                    // MOV [R14], ins.rd
-                    as.emit_reg_mem_op(MOV_RM_IMM32, as_t::NO_REG, as.sp_reg, 0); 
-                    as.emit_u32(ins.rd);
-
-                    // ADD R14, 16
-                    as.emit_alu64_imm8(as_t::op_ext_t::ADD, as.sp_reg, 16); 
+                    // PUSH R13
+                    as.emit_push(as_t::bp_reg);
 
                     // LEA R13, [R13 + ins.rd * 8]
-                    as.emit_reg_mem_op(LEA, as.bp_reg, as.bp_reg, (int32_t)ins.rd * 8);
+                    as.emit_reg_mem_op(LEA, as_t::bp_reg, as_t::bp_reg, (int32_t)ins.rd * 8);
 
                     // CALL rel32
                     as.emit(CALL_REL);
                     patches.push_back({ (uint32_t)as.codes.size(), (uint32_t)i, (int32_t)ins.u.imm });
                     as.emit_u32(0);
 
+                    // POP R13
+                    as.emit_pop(as.bp_reg);
                     break;
                 }
 
                 case opcode_t::ret: {
                     auto it = std::find_if(exe.functions.begin(), exe.functions.end(), [=](const function_info_t& func) { 
-                        return i >= func.start && i <= func.end;
+                        return i >= func.start && i < func.end;
                     });
 
                     std::array<uint8_t, 2> bp_regs_ffush_range = { 0, it == exe.functions.end() ? uint8_t(255) : uint8_t(((*it).ret_val_size + 7) / 8) };
                     as.fflush_all_regs(bp_regs_ffush_range);
 
-                    as.emit_alu64_imm8(as_t::op_ext_t::SUB, as.sp_reg, 16);   // SUB R14, 16
-                    as.emit_reg_mem_op(MOV_R_RM, as_t::RAX, as.sp_reg, 0);    // MOV RAX, [R14]
-
-                    // SHL RAX, 3
-                    as.emit_rex(as_t::NO_REG, as_t::RAX);
-                    as.emit(0xC1); 
-                    as.emit_modrm(Mod_Reg, as_t::op_ext_t(4), as_t::RAX);
-                    as.emit(0x03);
-
-                    as.emit_alu64(SUB_R_RM, as.bp_reg, as_t::RAX); // SUB R13, RAX
-                    as.emit(0xC3); // RET
+                    as.emit(RET); // RET
                     break;
                 }
 
                 case opcode_t::call_host: {
-                    as.fflush_all_regs({(uint8_t)ins.rd, 255});
+                    as.fflush_all_regs();
+                    as.mark_regs_invalid();
+
+                    as.emit(0x48, 0x83, 0xEC, 0x20); // SUB RSP, 32
 
                     // LEA RCX, [R13 + ins.rd * 8]
-                    as.emit_reg_mem_op(LEA, as_t::RCX, as.bp_reg, ins.rd * 8);
+                    as.emit_reg_mem_op(LEA, as_t::RCX, as_t::bp_reg, ins.rd * 8);
                     
                     // MOV RDX, RCX
                     as.emit_mov(as_t::RDX, as_t::RCX);
@@ -784,7 +804,8 @@ public:
                     as.emit_rex(as.NO_REG, as_t::RAX);
                     as.emit(GRP5);
                     as.emit_modrm(Mod_Reg, as_t::op_ext_t(2), as_t::RAX);
-
+                    
+                    as.emit(0x48, 0x83, 0xC4, 0x20); // ADD RSP, 32
                     break;
                 }
 
@@ -829,11 +850,9 @@ public:
 [[maybe_unused]] static inline auto win32_x64_jit_exmaple(const ineffa::script::executable_t& exe) {
     using namespace ineffa::script;
 
-    uint32_t stack_size = 8 * 1024;
-    auto value_stack = std::vector<value_t>(stack_size);
-    auto call_stack = std::vector<uint64_t>(stack_size / 2);
+    auto value_stack = std::vector<value_t>(8 * 1024);
     std::vector<std::pair<std::string_view, host_func_t>> host_functions = {};
 
     win32_x64_jit::jit_func_t jit_func = win32_x64_jit::compile(exe, host_functions);
-    jit_func(value_stack.data(), call_stack.data());
+    jit_func(value_stack.data());
 }

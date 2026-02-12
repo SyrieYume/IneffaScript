@@ -32,7 +32,7 @@ class ast_parser_t {
 public:
     ast_parser_t(std::pmr::polymorphic_allocator<std::byte> allocator) : allocator_(allocator) {}
 
-    auto parse(std::string_view source_code) const -> ast_node_t* {
+    auto parse(std::string_view source_code) -> ast_node_t* {
         current_ = source_code.data();
         end_ = source_code.data() + source_code.size();
         line_ = 1;
@@ -52,11 +52,11 @@ public:
     }
 
 private:
-    [[noreturn]] void error(std::string_view msg) const {
+    [[noreturn]] void error(std::string_view msg) {
         throw std::runtime_error(std::format("[ast_parser_error] [line: {}] {}", line_, msg));
     }
 
-    void skip() const noexcept {
+    void skip() noexcept {
         while (current_ < end_) {
             if (match('\n')) [[unlikely]]
                 line_++;
@@ -71,11 +71,11 @@ private:
         }
     }
 
-    bool match(char expected) const noexcept {
+    bool match(char expected) noexcept {
         return *current_ == expected ? (++current_, true) : false;
     }
 
-    ast_node_t* alloc_node(ast_node_t::node_type_t type, uint32_t data_len, const void* data) const {
+    ast_node_t* alloc_node(ast_node_t::node_type_t type, uint32_t data_len, const void* data) {
         size_t bytes = sizeof(ast_node_t) + (type == ast_node_t::type_atom ? sizeof(const char*) : data_len);
         auto* node = (ast_node_t*)allocator_.allocate_bytes(bytes, alignof(ast_node_t));
         *node = ast_node_t(type, line_, data_len);
@@ -85,7 +85,7 @@ private:
             (*(const char**)(node + 1) = (const char*)data, node);
     }
 
-    ast_node_t* parse_expr() const {
+    ast_node_t* parse_expr() {
         if (skip(); current_ >= end_) [[unlikely]]
             error("unexpected end of file");
 
@@ -127,10 +127,10 @@ private:
         return alloc_node(ast_node_t::type_atom, (uint32_t)(current_ - start), start);
     }
 
-    mutable std::pmr::polymorphic_allocator<std::byte> allocator_;
-    mutable const char* current_;
-    mutable const char* end_;
-    mutable uint32_t line_;
+    std::pmr::polymorphic_allocator<std::byte> allocator_;
+    const char* current_;
+    const char* end_;
+    uint32_t line_;
 };
 
 }

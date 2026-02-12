@@ -2,6 +2,7 @@
 #include <print>
 #include <fstream>
 #include <ranges>
+#include <random>
 #include <string_view>
 #include "vm.hpp"
 #include "parser.hpp"
@@ -42,18 +43,6 @@ static auto disassembly(const ineffa::script::executable_t& exe) -> std::string 
         std::format_to(std::back_inserter(result), "{:04d}: {:<28}", i, opcode_to_string_array[(uint8_t)ins.opcode]);
 
         switch (ins.opcode) {
-            case load_64: 
-            case load_u32:
-            case load_u16:
-            case load_u8: 
-            case load_i32:
-            case load_i16:
-            case load_i8: 
-
-            case store_64:
-            case store_32:
-            case store_16:
-            case store_8:
             case add_imm_i8:
                 std::format_to(std::back_inserter(result), "r{}, r{}, {}\n", ins.rd, ins.i.rs1, ins.i.imm);
                 break;
@@ -90,17 +79,17 @@ static auto disassembly(const ineffa::script::executable_t& exe) -> std::string 
                 std::format_to(std::back_inserter(result), "target: {:04d}, bp: r{}\n", (int32_t)i + (int32_t)ins.u.imm + 1, ins.rd);
                 break;
 
-            case opcode_t::call_reg:
+            case call_reg:
                 std::format_to(std::back_inserter(result), "target: r{}, bp: r{}\n", ins.rd, (uint16_t)ins.u.imm);
                 break;
 
-            case opcode_t::jump_if_true: 
-            case opcode_t::jump_if_false:
+            case jump_if_true: 
+            case jump_if_false:
                 std::format_to(std::back_inserter(result), "r{}, target: {:04d}\n", ins.rd, (int32_t)i + (int32_t)ins.u.imm + 1);
                 break;
-                
-            case jump_if_greater_than_i64:
-            case jump_if_greater_equal_i64:
+            
+            case jump_if_less_than_i64:
+            case jump_if_less_equal_i64:
                 std::format_to(std::back_inserter(result), "r{}, r{}, target: {:04d}\n", ins.rd, ins.i.rs1, (int32_t)i + (int32_t)ins.i.imm + 1);
                 break;
 
@@ -108,12 +97,12 @@ static auto disassembly(const ineffa::script::executable_t& exe) -> std::string 
                 std::format_to(std::back_inserter(result), "r{}, r{}, target: {:04d}\n", ins.rd, ins.i.rs1, (int32_t)i - (uint8_t)ins.i.imm + 1);
                 break;
             
-            case opcode_t::call_host:
+            case call_host:
                 std::format_to(std::back_inserter(result), "func_id: {}, args: r{}\n", (uint16_t)ins.u.imm, ins.rd);
                 break;
 
-            case opcode_t::ret:
-            case opcode_t::halt:
+            case ret:
+            case halt:
                 std::format_to(std::back_inserter(result), "\n");
                 break;
 
@@ -165,6 +154,25 @@ auto main(int argc, char* argv[]) -> int try {
         std::print("{:.6f}", args[0].f64);
     });
 
+    vm.host_functions.emplace_back("new", [](value_t* args, value_t* result) -> void {
+        result->ptr = ::operator new(args[0].u64);
+    });
+
+    vm.host_functions.emplace_back("delete", [](value_t* args, value_t* result) -> void {
+        ::operator delete(args[0].ptr);
+    });
+
+    vm.host_functions.emplace_back("random_i32", [](value_t* args, value_t* result) -> void {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+
+        int32_t min = args[0].i32;
+        int32_t max = args[1].i32;
+        std::uniform_int_distribution<int32_t> distribution(min, max);
+        
+        result->i32 = distribution(gen);
+    });
+
     
     std::string source_code = read_file(file_path);
 
@@ -183,7 +191,7 @@ auto main(int argc, char* argv[]) -> int try {
 
         else if (mode == "--run-jit") {
             auto jit_func = win32_x64_jit::compile(exe, vm.host_functions);
-            jit_func(vm.bp, vm.sp);
+            jit_func(vm.bp);
         }
 
         else throw std::runtime_error(std::format("unknown argument '{}'", mode));
