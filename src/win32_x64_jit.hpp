@@ -103,8 +103,7 @@ public:
         Mod_Disp32 = 2,  // [reg + 32bit]
         Mod_Reg = 3      // reg
     };
-
-    
+  
     enum class op_ext_t : uint8_t {
         ADD = 0, OR = 1, ADC = 2, SBB = 3, AND = 4, SUB = 5, XOR = 6, CMP = 7,  // ALU 扩展码
         ROL = 0, ROR = 1, RCL = 2, RCR = 3, SHL = 4, SHR = 5, SAR = 7,          // Shift 扩展码
@@ -116,89 +115,7 @@ public:
     using enum mod_r_m_t;
 
     static constexpr reg_t bp_reg = reg_t::R13;
-    static constexpr std::array allocable_regs = { RBX, RSI, RDI, R8, R9, R10, R11, R14, R15 };
-
-    struct reg_state_t {
-        uint32_t last_access_time;
-        uint8_t bp_reg_idx;
-        bool is_valid;
-        bool is_dirty;
-    };
-
     std::vector<uint8_t> codes;
-    std::array<reg_state_t, sizeof(allocable_regs)> regs_state = {};
-    uint32_t current_tick = 0;
-
-
-    void setup_reg(uint32_t i, uint8_t bp_reg_idx, bool is_to_write) {
-        regs_state[i] = {
-            .last_access_time = current_tick,
-            .bp_reg_idx = bp_reg_idx,
-            .is_valid = true,
-            .is_dirty = is_to_write
-        };
-        if (!is_to_write)
-            load_from_bp_index(allocable_regs[i], bp_reg_idx);
-    }
-
-    void fflush_reg(uint32_t reg_index) {
-        if (!regs_state[reg_index].is_valid)
-            return;
-        if (regs_state[reg_index].is_dirty)
-            store_to_bp_index(allocable_regs[reg_index], regs_state[reg_index].bp_reg_idx);
-        regs_state[reg_index].is_dirty = false;
-    }
-
-    reg_t alloc_reg(uint8_t bp_reg_idx, bool is_to_write) {
-        current_tick++;
-
-        for (uint32_t i = 0; i < allocable_regs.size(); i++)
-            if (regs_state[i].is_valid && regs_state[i].bp_reg_idx == bp_reg_idx) {
-                regs_state[i].last_access_time = current_tick;
-                if (is_to_write) regs_state[i].is_dirty = true;
-                return allocable_regs[i];
-            }
-
-        for (uint32_t i = 0; i < allocable_regs.size(); i++)
-            if (!regs_state[i].is_valid) {
-                setup_reg(i, bp_reg_idx, is_to_write);
-                return allocable_regs[i];
-            }
-
-        uint32_t min_tick = std::numeric_limits<uint32_t>::max();
-        int32_t eviction_idx = 0;
-        
-        for (uint32_t i = 0; i < allocable_regs.size(); i++) {
-            if (regs_state[i].last_access_time < min_tick) {
-                min_tick = regs_state[i].last_access_time;
-                eviction_idx = i;
-            }
-        }
-        
-        fflush_reg(eviction_idx);
-        setup_reg(eviction_idx, bp_reg_idx, is_to_write);
-        return allocable_regs[eviction_idx];
-    }
-
-    void mark_regs_invalid() {
-        for (uint32_t i = 0; i < allocable_regs.size(); i++)
-            regs_state[i].is_valid = false;
-    }
-
-    void mark_reg_dirty(reg_t reg) {
-        for (uint32_t i = 0; i < allocable_regs.size(); i++) {
-            if (allocable_regs[i] == reg) {
-                regs_state[i].is_dirty = true;
-                break;
-            }
-        }
-    }
-
-    void fflush_all_regs(std::array<uint8_t, 2> bp_regs_fflush_range = {0, 255}) {
-        for (uint32_t i = 0; i < allocable_regs.size(); i++)
-            if (uint8_t bp_reg_idx = regs_state[i].bp_reg_idx; bp_reg_idx >= bp_regs_fflush_range[0] && bp_reg_idx < bp_regs_fflush_range[1])
-                fflush_reg(i);
-    }
 
     template <typename... Args>
     void emit(Args&&... args) {
@@ -217,7 +134,7 @@ public:
         std::memcpy(codes.data() + sz, &u, 8);
     }
 
-    void emit_rex(reg_t reg, reg_t base, reg_t index = reg_t::RAX, bool is_64bit = true) {
+    void emit_rex(reg_t reg, reg_t base, reg_t index = RAX, bool is_64bit = true) {
         uint8_t rex = 0x40 | (is_64bit << 3) | (((uint8_t)reg & 8) >> 1) | (((uint8_t)index & 8) >> 2) | (((uint8_t)base & 8) >> 3);
         if (rex != 0x40 || (reg >= RSP && reg <= RDI && !is_64bit)) emit(rex);
     }
@@ -401,6 +318,98 @@ public:
 };
 
 
+class x64_register_allocator_t {
+private:
+    x64_assember_t& as; 
+    uint32_t current_tick = 0;
+
+public:
+    using enum x64_assember_t::reg_t;
+    static constexpr std::array allocable_regs = { RBX, RSI, RDI, R8, R9, R10, R11, R14, R15 };
+
+    struct reg_state_t {
+        uint32_t last_access_time;
+        uint8_t bp_reg_idx;
+        bool is_valid;
+        bool is_dirty;
+    };
+
+    std::array<reg_state_t, sizeof(allocable_regs)> regs_state = {};
+
+    x64_register_allocator_t(x64_assember_t& assember) : as(assember) {}
+
+    void setup_reg(uint32_t i, uint8_t bp_reg_idx, bool is_to_write) {
+        regs_state[i] = {
+            .last_access_time = current_tick,
+            .bp_reg_idx = bp_reg_idx,
+            .is_valid = true,
+            .is_dirty = is_to_write
+        };
+        if (!is_to_write)
+            as.load_from_bp_index(allocable_regs[i], bp_reg_idx);
+    }
+
+    void fflush_reg(uint32_t reg_index) {
+        if (!regs_state[reg_index].is_valid)
+            return;
+        if (regs_state[reg_index].is_dirty)
+            as.store_to_bp_index(allocable_regs[reg_index], regs_state[reg_index].bp_reg_idx);
+        regs_state[reg_index].is_dirty = false;
+    }
+
+    auto alloc(uint8_t bp_reg_idx, bool is_to_write) -> x64_assember_t::reg_t {
+        current_tick++;
+
+        for (uint32_t i = 0; i < allocable_regs.size(); i++)
+            if (regs_state[i].is_valid && regs_state[i].bp_reg_idx == bp_reg_idx) {
+                regs_state[i].last_access_time = current_tick;
+                if (is_to_write) regs_state[i].is_dirty = true;
+                return allocable_regs[i];
+            }
+
+        for (uint32_t i = 0; i < allocable_regs.size(); i++)
+            if (!regs_state[i].is_valid) {
+                setup_reg(i, bp_reg_idx, is_to_write);
+                return allocable_regs[i];
+            }
+
+        uint32_t min_tick = std::numeric_limits<uint32_t>::max();
+        int32_t eviction_idx = 0;
+        
+        for (uint32_t i = 0; i < allocable_regs.size(); i++) {
+            if (regs_state[i].last_access_time < min_tick) {
+                min_tick = regs_state[i].last_access_time;
+                eviction_idx = i;
+            }
+        }
+        
+        fflush_reg(eviction_idx);
+        setup_reg(eviction_idx, bp_reg_idx, is_to_write);
+        return allocable_regs[eviction_idx];
+    }
+
+    void mark_all_invalid() {
+        for (uint32_t i = 0; i < allocable_regs.size(); i++)
+            regs_state[i].is_valid = false;
+    }
+
+    void mark_dirty(x64_assember_t::reg_t reg) {
+        for (uint32_t i = 0; i < allocable_regs.size(); i++) {
+            if (allocable_regs[i] == reg) {
+                regs_state[i].is_dirty = true;
+                break;
+            }
+        }
+    }
+
+    void fflush_all(std::array<uint8_t, 2> bp_regs_fflush_range = {0, 255}) {
+        for (uint32_t i = 0; i < allocable_regs.size(); i++)
+            if (uint8_t bp_reg_idx = regs_state[i].bp_reg_idx; bp_reg_idx >= bp_regs_fflush_range[0] && bp_reg_idx < bp_regs_fflush_range[1])
+                fflush_reg(i);
+    }
+};
+
+
 class win32_x64_jit {
 private:
     struct bytecode_info_t {
@@ -424,14 +433,12 @@ public:
         }
 
         explicit jit_func_t(std::span<uint8_t> codes) {
-            exe_mem = VirtualAlloc(NULL, codes.size(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-            if (exe_mem == nullptr) 
+            if ((exe_mem = VirtualAlloc(NULL, codes.size(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)) == nullptr) 
                 throw std::system_error(GetLastError(), std::system_category(), "VirtualAlloc failed");
 
             std::memcpy(exe_mem, codes.data(), codes.size());
 
-            DWORD oldProtect;
-            if (!VirtualProtect(exe_mem, codes.size(), PAGE_EXECUTE_READ, &oldProtect)) {
+            if (DWORD old_protect; !VirtualProtect(exe_mem, codes.size(), PAGE_EXECUTE_READ, &old_protect)) {
                 VirtualFree(exe_mem, 0, MEM_RELEASE);
                 throw std::system_error(GetLastError(), std::system_category(), "VirtualProtect failed");
             }
@@ -445,17 +452,10 @@ public:
 
         jit_func_t(const jit_func_t&) = delete;
         jit_func_t& operator=(const jit_func_t&) = delete;
-        jit_func_t(jit_func_t&& other) noexcept : exe_mem(other.exe_mem) {
-            other.exe_mem = nullptr; 
-        }
-
+        jit_func_t(jit_func_t&& other) noexcept : exe_mem(std::exchange(other.exe_mem, nullptr)) {}
+        
         jit_func_t& operator=(jit_func_t&& other) noexcept {
-            if (this != &other) {
-                if (exe_mem) VirtualFree(exe_mem, 0, MEM_RELEASE);
-                exe_mem = other.exe_mem;
-                other.exe_mem = nullptr;
-            }
-            return *this;
+            return (std::swap(exe_mem, other.exe_mem), *this);
         }
 
     private:
@@ -469,6 +469,7 @@ public:
         using enum x64_assember_t::mod_r_m_t;
         
         x64_assember_t as;
+        auto regs = x64_register_allocator_t(as);
         std::vector<bytecode_info_t> bytecodes_info;
         bytecodes_info.resize(exe.bytecodes.size() + 1);
         std::vector<jump_patch_t> patches;
@@ -505,14 +506,14 @@ public:
 
         for (auto [i, ins] : exe.bytecodes | std::views::enumerate) {
             if (bytecodes_info[i].is_jump_target) {
-                as.fflush_all_regs();
-                as.mark_regs_invalid();
+                regs.fflush_all();
+                regs.mark_all_invalid();
             }
 
             bytecodes_info[i].target_code_offset = as.codes.size();
 
             if (bytecodes_info[i].is_function_start)
-                as.mark_regs_invalid();
+                regs.mark_all_invalid();
             
             switch (ins.opcode) {
                 case opcode_t::add_64:
@@ -539,9 +540,9 @@ public:
                 case opcode_t::set_is_equal_64:
                 case opcode_t::set_is_not_equal_64:
                 {
-                    auto rs1 = as.alloc_reg(ins.r.rs1, false);
-                    auto rs2 = as.alloc_reg(ins.r.rs2, false);
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rs1 = regs.alloc(ins.r.rs1, false);
+                    auto rs2 = regs.alloc(ins.r.rs2, false);
+                    auto rd = regs.alloc(ins.rd, true);
 
                     switch (ins.opcode) {
                         case opcode_t::add_64:   as.emit_mov(rd, rs1); as.emit_alu64(ADD_R_RM, rd, rs2); break;
@@ -582,8 +583,8 @@ public:
                 }
 
                 case opcode_t::not_64: {
-                    auto rs1 = as.alloc_reg(ins.r.rs1, false);
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rs1 = regs.alloc(ins.r.rs1, false);
+                    auto rd = regs.alloc(ins.rd, true);
                     as.emit_mov(rd, rs1);
                     as.emit_rex(rd, as_t::NO_REG);
                     as.emit(as_t::op_t::GRP3_64);
@@ -592,29 +593,29 @@ public:
                 }
 
                 case opcode_t::add_imm_i8: {
-                    auto rs1 = as.alloc_reg(ins.i.rs1, false);
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rs1 = regs.alloc(ins.i.rs1, false);
+                    auto rd = regs.alloc(ins.rd, true);
                     as.emit_mov(rd, rs1);
                     as.emit_alu64_imm8(as_t::op_ext_t::ADD, rd, ins.i.imm);
                     break;
                 }
                 
                 case opcode_t::move_64: {
-                    auto rs1 = as.alloc_reg(ins.i.rs1, false);
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rs1 = regs.alloc(ins.i.rs1, false);
+                    auto rd = regs.alloc(ins.rd, true);
                     as.emit_mov(rd, rs1);
                     break;
                 }
 
                 case opcode_t::load_imm_i16: {
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rd = regs.alloc(ins.rd, true);
                     as.load_imm(rd, (int64_t)ins.u.imm);
                     break;
                 }
                 
                 case opcode_t::cast_i64_to_f64: {
-                    auto rs1 = as.alloc_reg(ins.i.rs1, false);
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rs1 = regs.alloc(ins.i.rs1, false);
+                    auto rd = regs.alloc(ins.rd, true);
                     auto xmm0 = as_t::reg_t(0);
 
                     // CVTSI2SD xmm0, rs1
@@ -632,8 +633,8 @@ public:
                 }
                 
                 case opcode_t::cast_f64_to_i64: {
-                    auto rs1 = as.alloc_reg(ins.i.rs1, false);
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rs1 = regs.alloc(ins.i.rs1, false);
+                    auto rd = regs.alloc(ins.rd, true);
                     auto xmm0 = as_t::reg_t(0);
 
                     // MOVQ xmm0, rs1
@@ -651,7 +652,7 @@ public:
                 }
 
                 case opcode_t::jump: {
-                    as.fflush_all_regs();
+                    regs.fflush_all();
                     
                     // JMP rel32
                     as.emit(JMP_REL);
@@ -662,9 +663,9 @@ public:
 
                 case opcode_t::jump_if_true:
                 case opcode_t::jump_if_false: {
-                    auto rd = as.alloc_reg(ins.rd, false);
+                    auto rd = regs.alloc(ins.rd, false);
 
-                    as.fflush_all_regs();
+                    regs.fflush_all();
 
                     // TEST rd, rd
                     as.emit_rex(rd, rd);
@@ -680,10 +681,10 @@ public:
 
                 case opcode_t::jump_if_less_than_i64:
                 case opcode_t::jump_if_less_equal_i64: {
-                    auto rd = as.alloc_reg(ins.rd, false);
-                    auto rs1 = as.alloc_reg(ins.i.rs1, false);
+                    auto rd = regs.alloc(ins.rd, false);
+                    auto rs1 = regs.alloc(ins.i.rs1, false);
 
-                    as.fflush_all_regs();
+                    regs.fflush_all();
 
                     // CMP rd, rs1
                     as.emit_alu64(CMP_R_RM, rd, rs1);
@@ -696,16 +697,16 @@ public:
                 }
 
                 case opcode_t::loop_inc_check_jump: {
-                    auto rs1 = as.alloc_reg(ins.i.rs1, false);
-                    auto rd = as.alloc_reg(ins.rd, false);
-                    as.mark_reg_dirty(rd);
+                    auto rs1 = regs.alloc(ins.i.rs1, false);
+                    auto rd = regs.alloc(ins.rd, false);
+                    regs.mark_dirty(rd);
 
                     // INC r64
                     as.emit_rex(as_t::NO_REG, rd);
                     as.emit(as_t::GRP5);
                     as.emit_modrm(Mod_Reg, as_t::NO_REG, rd);
 
-                    as.fflush_all_regs();
+                    regs.fflush_all();
 
                     // CMP rd, rs1
                     as.emit_alu64(CMP_R_RM, rd, rs1);
@@ -744,17 +745,17 @@ public:
                         default: std::unreachable();
                     }
 
-                    auto base  = as.alloc_reg(ins.r.rs1, false);
-                    auto index = as.alloc_reg(ins.r.rs2, false);
-                    auto src_or_dst = as.alloc_reg(ins.rd, !cfg.is_store);
+                    auto base  = regs.alloc(ins.r.rs1, false);
+                    auto index = regs.alloc(ins.r.rs2, false);
+                    auto src_or_dst = regs.alloc(ins.rd, !cfg.is_store);
 
                     as.emit_mem_sib(cfg.is_store, cfg.width_bytes, cfg.is_signed, src_or_dst, base, index);
                     break;
                 }
 
                 case opcode_t::call: {
-                    as.fflush_all_regs();
-                    as.mark_regs_invalid();
+                    regs.fflush_all();
+                    regs.mark_all_invalid();
 
                     // PUSH R13
                     as.emit_push(as_t::bp_reg);
@@ -778,15 +779,15 @@ public:
                     });
 
                     std::array<uint8_t, 2> bp_regs_ffush_range = { 0, it == exe.functions.end() ? uint8_t(255) : uint8_t(((*it).ret_val_size + 7) / 8) };
-                    as.fflush_all_regs(bp_regs_ffush_range);
+                    regs.fflush_all(bp_regs_ffush_range);
 
                     as.emit(RET); // RET
                     break;
                 }
 
                 case opcode_t::call_host: {
-                    as.fflush_all_regs();
-                    as.mark_regs_invalid();
+                    regs.fflush_all();
+                    regs.mark_all_invalid();
 
                     as.emit(0x48, 0x83, 0xEC, 0x20); // SUB RSP, 32
 
@@ -810,13 +811,13 @@ public:
                 }
 
                 case opcode_t::load_constant_64: {
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rd = regs.alloc(ins.rd, true);
                     as.load_imm(rd, ((uint64_t*)exe.constants.data())[(uint16_t)ins.u.imm]);
                     break;
                 }
 
                 case opcode_t::load_constant_str: {
-                    auto rd = as.alloc_reg(ins.rd, true);
+                    auto rd = regs.alloc(ins.rd, true);
                     const uint64_t* const_base = (const uint64_t*)exe.constants.data();
                     uint64_t target_addr = (uint64_t)(const_base + ins.u.imm);
                     as.load_imm(rd, target_addr);
@@ -847,7 +848,7 @@ public:
 }
 
 
-[[maybe_unused]] static inline auto win32_x64_jit_exmaple(const ineffa::script::executable_t& exe) {
+[[maybe_unused]] static inline auto win32_x64_jit_example(const ineffa::script::executable_t& exe) {
     using namespace ineffa::script;
 
     auto value_stack = std::vector<value_t>(8 * 1024);
